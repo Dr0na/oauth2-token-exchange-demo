@@ -15,6 +15,25 @@ json_field() {
   echo "${json}" | tr -d '\n' | sed -n "s/.*\"${field}\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p" | head -n 1
 }
 
+retry() {
+  local attempts=$1
+  local delay=$2
+  shift 2
+  local attempt=1
+  while true; do
+    if "$@"; then
+      return 0
+    fi
+    if (( attempt >= attempts )); then
+      echo "Command failed after ${attempts} attempts: $*" >&2
+      return 1
+    fi
+    echo "Attempt ${attempt}/${attempts} failed; retrying in ${delay}s..."
+    sleep "${delay}"
+    ((attempt++))
+  done
+}
+
 wait_for_url() {
   local url=$1
   local name=$2
@@ -39,32 +58,35 @@ echo "Configuring token exchange permissions on Beta realm..."
   --password "${ADMIN_PASSWORD}"
 
 echo "Enabling fine-grained admin permissions on realm ${REALM_BETA}..."
-/opt/keycloak/bin/kcadm.sh update "realms/${REALM_BETA}" -s adminPermissionsEnabled=true
+retry 10 3 /opt/keycloak/bin/kcadm.sh update "realms/${REALM_BETA}" -s adminPermissionsEnabled=true
 
 echo "Enabling IdP permissions for ${IDP_ALIAS}..."
-/opt/keycloak/bin/kcadm.sh update "identity-provider/instances/${IDP_ALIAS}/management/permissions" \
+retry 10 3 /opt/keycloak/bin/kcadm.sh update "identity-provider/instances/${IDP_ALIAS}/management/permissions" \
   -r "${REALM_BETA}" \
   -s enabled=true
 
-REALM_MGMT_ID=$(
-  /opt/keycloak/bin/kcadm.sh get clients -r "${REALM_BETA}" -q clientId=realm-management --fields id --format csv --noquotes \
+lookup_client_id() {
+  local client_id=$1
+  /opt/keycloak/bin/kcadm.sh get clients -r "${REALM_BETA}" -q "clientId=${client_id}" --fields id --format csv --noquotes \
     | tail -n 1
-)
+}
 
-BROKER_CLIENT_ID=$(
-  /opt/keycloak/bin/kcadm.sh get clients -r "${REALM_BETA}" -q clientId="${BROKER_CLIENT}" --fields id --format csv --noquotes \
-    | tail -n 1
-)
+wait_for_client() {
+  local client_id=$1
+  local id=""
+  until id="$(lookup_client_id "${client_id}")" && [[ -n "${id}" && "${id}" != "id" ]]; do
+    sleep 2
+  done
+  echo "${id}"
+}
 
-INVENTORY_CLIENT_ID=$(
-  /opt/keycloak/bin/kcadm.sh get clients -r "${REALM_BETA}" -q clientId=inventory-api --fields id --format csv --noquotes \
-    | tail -n 1
-)
+echo "Waiting for realm clients to be available..."
+REALM_MGMT_ID="$(wait_for_client realm-management)"
+BROKER_CLIENT_ID="$(wait_for_client "${BROKER_CLIENT}")"
+INVENTORY_CLIENT_ID="$(wait_for_client inventory-api)"
 
-if [[ -z "${BROKER_CLIENT_ID}" || "${BROKER_CLIENT_ID}" == "id" ]]; then
-  echo "Unable to locate broker client ${BROKER_CLIENT}" >&2
-  exit 1
-fi
+echo "Waiting for realm-management authorization server..."
+retry 15 3 /opt/keycloak/bin/kcadm.sh get "clients/${REALM_MGMT_ID}/authz/resource-server" -r "${REALM_BETA}" >/dev/null
 
 IDP_PERMISSIONS=$(
   /opt/keycloak/bin/kcadm.sh get "identity-provider/instances/${IDP_ALIAS}/management/permissions" -r "${REALM_BETA}"
@@ -92,12 +114,18 @@ if [[ -z "${TOKEN_EXCHANGE_SCOPE_ID}" ]]; then
   exit 1
 fi
 
-POLICY_ID=$(
-  /opt/keycloak/bin/kcadm.sh get "clients/${REALM_MGMT_ID}/authz/resource-server/policy" -r "${REALM_BETA}" -q name=allow-order-service-broker --fields id --format csv --noquotes \
+lookup_policy_id() {
+  /opt/keycloak/bin/kcadm.sh get "clients/${REALM_MGMT_ID}/authz/resource-server/policy" -r "${REALM_BETA}" \
+    -q name=allow-order-service-broker --fields id --format csv --noquotes \
     | tail -n 1
-)
+}
 
-if [[ -z "${POLICY_ID}" || "${POLICY_ID}" == "id" ]]; then
+ensure_client_policy() {
+  POLICY_ID="$(lookup_policy_id)"
+  if [[ -n "${POLICY_ID}" && "${POLICY_ID}" != "id" ]]; then
+    return 0
+  fi
+
   cat > /tmp/token-exchange-client-policy.json <<EOF
 {
   "name": "allow-order-service-broker",
@@ -109,16 +137,17 @@ if [[ -z "${POLICY_ID}" || "${POLICY_ID}" == "id" ]]; then
   }
 }
 EOF
-  POLICY_ID=$(
-    /opt/keycloak/bin/kcadm.sh create "clients/${REALM_MGMT_ID}/authz/resource-server/policy" \
-      -r "${REALM_BETA}" \
-      -f /tmp/token-exchange-client-policy.json \
-      -i
-  )
-  echo "Created client policy ${POLICY_ID}"
-else
-  echo "Reusing client policy ${POLICY_ID}"
-fi
+  /opt/keycloak/bin/kcadm.sh create "clients/${REALM_MGMT_ID}/authz/resource-server/policy" \
+    -r "${REALM_BETA}" \
+    -f /tmp/token-exchange-client-policy.json >/dev/null
+
+  POLICY_ID="$(lookup_policy_id)"
+  [[ -n "${POLICY_ID}" && "${POLICY_ID}" != "id" ]]
+}
+
+echo "Ensuring client policy exists..."
+retry 15 5 ensure_client_policy
+echo "Using client policy ${POLICY_ID}"
 
 IDP_PERMISSION_NAME=$(
   /opt/keycloak/bin/kcadm.sh get "clients/${REALM_MGMT_ID}/authz/resource-server/permission/scope/${IDP_TOKEN_EXCHANGE_PERMISSION_ID}" -r "${REALM_BETA}" \
@@ -138,7 +167,7 @@ cat > /tmp/idp-token-exchange-permission.json <<EOF
 }
 EOF
 
-/opt/keycloak/bin/kcadm.sh update \
+retry 10 3 /opt/keycloak/bin/kcadm.sh update \
   "clients/${REALM_MGMT_ID}/authz/resource-server/permission/scope/${IDP_TOKEN_EXCHANGE_PERMISSION_ID}" \
   -r "${REALM_BETA}" \
   -f /tmp/idp-token-exchange-permission.json
@@ -173,7 +202,7 @@ cat > /tmp/inventory-token-exchange-permission.json <<EOF
 }
 EOF
 
-/opt/keycloak/bin/kcadm.sh update \
+retry 10 3 /opt/keycloak/bin/kcadm.sh update \
   "clients/${REALM_MGMT_ID}/authz/resource-server/permission/scope/${INVENTORY_TOKEN_EXCHANGE_PERMISSION_ID}" \
   -r "${REALM_BETA}" \
   -f /tmp/inventory-token-exchange-permission.json

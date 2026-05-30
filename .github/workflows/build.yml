@@ -71,31 +71,40 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Start stack
-        run: docker compose up --build -d
+      - name: Start Keycloak
+        run: docker compose up --build -d keycloak-alpha keycloak-beta
 
-      - name: Wait for services
+      - name: Wait for Keycloak and run setup
         run: |
           set -euo pipefail
           deadline=$((SECONDS + 600))
 
           echo "Waiting for Keycloak Alpha..."
           until curl -sf http://localhost:8180/realms/customer/.well-known/openid-configuration >/dev/null; do
-            [[ $SECONDS -ge $deadline ]] && { docker compose logs; exit 1; }
+            [[ $SECONDS -ge $deadline ]] && { docker compose logs keycloak-alpha; exit 1; }
             sleep 5
           done
 
           echo "Waiting for Keycloak Beta..."
           until curl -sf http://localhost:8181/realms/warehouse/.well-known/openid-configuration >/dev/null; do
-            [[ $SECONDS -ge $deadline ]] && { docker compose logs; exit 1; }
+            [[ $SECONDS -ge $deadline ]] && { docker compose logs keycloak-beta; exit 1; }
             sleep 5
           done
 
-          echo "Waiting for keycloak-setup..."
-          if ! docker compose up keycloak-setup; then
-            docker compose logs keycloak-setup
+          echo "Running keycloak-setup..."
+          docker compose build keycloak-setup
+          if ! docker compose run --rm --no-TTY keycloak-setup; then
+            docker compose logs keycloak-setup || true
             exit 1
           fi
+
+      - name: Start application services
+        run: docker compose up -d inventory-service order-service
+
+      - name: Wait for application services
+        run: |
+          set -euo pipefail
+          deadline=$((SECONDS + 600))
 
           echo "Waiting for inventory-service..."
           until curl -sf http://localhost:8081/actuator/health | grep -q UP; do
