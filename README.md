@@ -63,17 +63,17 @@ This repo makes every hop **visible** — browser UI, CLI script, and traced ser
 
 ```
   Browser              Order Service           Keycloak Beta          Inventory Service
-    │                        │                       │                        │
-    │──① login (Alpha)──────>│                       │                        │
-    │<── customer token ─────│                       │                        │
-    │                        │                       │                        │
-    │──② GET /api/demo/─────>│                       │                        │
-    │   walkthrough          │──③ validate JWT       │                        │
-    │                        │──④ token exchange ───>│                        │
-    │                        │<── warehouse token ───│                        │
-    │                        │──⑤ GET /inventory ───────────────────────────>│
-    │                        │<────────────────────── stock data ────────────│
-    │<──⑥ order + inventory─│                       │                        │
+    │                         │                        │                        │
+    │──① login (Alpha)──────>│                        │                        │
+    │<── customer token ──────│                        │                        │
+    │                         │                        │                        │
+    │──② GET /api/demo/─────>│                        │                        │
+    │   walkthrough           │──③ validate JWT       │                        │
+    │                         │──④ token exchange ───>│                        │
+    │                         │<── warehouse token ────│                        │
+    │                         │──⑤ GET /inventory ────────────────────────────>│
+    │                         │<────────────────────── stock data ──────────────│
+    │<──⑥ order + inventory──│                        │                        │
 ```
 
 See [docs/architecture.md](docs/architecture.md) for component details, realm/client configuration, and Docker networking.
