@@ -1,0 +1,22 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: inventory-service
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${KEYCLOAK_BETA_ISSUER:http://localhost:8181/realms/warehouse}
+          jwk-set-uri: ${KEYCLOAK_BETA_JWK_SET_URI:http://localhost:8181/realms/warehouse/protocol/openid-connect/certs}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+logging:
+  level:
+    com.example.inventory: INFO

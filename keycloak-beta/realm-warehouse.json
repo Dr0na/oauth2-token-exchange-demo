@@ -1,0 +1,91 @@
+{
+  "realm": "warehouse",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": false,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": false,
+  "roles": {
+    "realm": [
+      {
+        "name": "warehouse-reader",
+        "description": "Can read warehouse inventory"
+      }
+    ]
+  },
+  "users": [
+    {
+      "username": "bob",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Bob",
+      "lastName": "Warehouse",
+      "email": "bob@warehouse.example.com",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "bob",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["warehouse-reader"]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "inventory-api",
+      "name": "Inventory API",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "inventory-api-secret",
+      "bearerOnly": true,
+      "directAccessGrantsEnabled": false,
+      "standardFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "protocol": "openid-connect",
+      "fullScopeAllowed": true
+    },
+    {
+      "clientId": "order-service-broker",
+      "name": "Order Service Broker",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "order-service-broker-secret",
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "fullScopeAllowed": true
+    }
+  ],
+  "identityProviders": [
+    {
+      "alias": "customer-idp",
+      "displayName": "Customer Portal IdP",
+      "providerId": "oidc",
+      "enabled": true,
+      "trustEmail": true,
+      "storeToken": false,
+      "addReadTokenRoleOnCreate": false,
+      "authenticateByDefault": false,
+      "linkOnly": false,
+      "firstBrokerLoginFlowAlias": "first broker login",
+      "config": {
+        "authorizationUrl": "http://localhost:8180/realms/customer/protocol/openid-connect/auth",
+        "tokenUrl": "http://keycloak-alpha:8180/realms/customer/protocol/openid-connect/token",
+        "userInfoUrl": "http://keycloak-alpha:8180/realms/customer/protocol/openid-connect/userinfo",
+        "issuer": "http://localhost:8180/realms/customer",
+        "clientId": "token-exchange-validator",
+        "clientSecret": "token-exchange-validator-secret",
+        "validateSignature": "true",
+        "useJwksUrl": "true",
+        "jwksUrl": "http://keycloak-alpha:8180/realms/customer/protocol/openid-connect/certs",
+        "syncMode": "IMPORT",
+        "defaultScope": "openid profile email"
+      }
+    }
+  ]
+}

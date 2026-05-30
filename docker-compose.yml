@@ -1,0 +1,121 @@
+services:
+  keycloak-alpha:
+    image: quay.io/keycloak/keycloak:26.2.5
+    command:
+      - start-dev
+      - --import-realm
+      - --features=token-exchange:v1,admin-fine-grained-authz:v1
+      - --health-enabled=true
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_HTTP_PORT: 8180
+      KC_HOSTNAME: localhost
+      KC_HOSTNAME_PORT: 8180
+      KC_HOSTNAME_STRICT: "false"
+      KC_HTTP_ENABLED: "true"
+      KC_HEALTH_ENABLED: "true"
+    volumes:
+      - ./keycloak-alpha/realm-customer.json:/opt/keycloak/data/import/realm-customer.json:ro
+    ports:
+      - "8180:8180"
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8180 && echo -e 'GET /realms/customer/.well-known/openid-configuration HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -q '200 OK'"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 40s
+
+  keycloak-beta:
+    image: quay.io/keycloak/keycloak:26.2.5
+    command:
+      - start-dev
+      - --import-realm
+      - --features=token-exchange:v1,admin-fine-grained-authz:v1
+      - --health-enabled=true
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_HTTP_PORT: 8181
+      KC_HOSTNAME: localhost
+      KC_HOSTNAME_PORT: 8181
+      KC_HOSTNAME_STRICT: "false"
+      KC_HTTP_ENABLED: "true"
+      KC_HEALTH_ENABLED: "true"
+    volumes:
+      - ./keycloak-beta/realm-warehouse.json:/opt/keycloak/data/import/realm-warehouse.json:ro
+    ports:
+      - "8181:8181"
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8181 && echo -e 'GET /realms/warehouse/.well-known/openid-configuration HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -q '200 OK'"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 40s
+
+  keycloak-setup:
+    build:
+      context: .
+      dockerfile: keycloak-setup/Dockerfile
+    depends_on:
+      keycloak-alpha:
+        condition: service_healthy
+      keycloak-beta:
+        condition: service_healthy
+    environment:
+      KEYCLOAK_ALPHA_URL: http://keycloak-alpha:8180
+      KEYCLOAK_BETA_URL: http://keycloak-beta:8181
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KEYCLOAK_BETA_REALM: warehouse
+      TOKEN_EXCHANGE_SUBJECT_ISSUER: customer-idp
+      TOKEN_EXCHANGE_CLIENT_ID: order-service-broker
+    restart: "no"
+
+  inventory-service:
+    build:
+      context: ./inventory-service
+    depends_on:
+      keycloak-beta:
+        condition: service_healthy
+      keycloak-setup:
+        condition: service_completed_successfully
+    environment:
+      KEYCLOAK_BETA_ISSUER: http://localhost:8181/realms/warehouse
+      KEYCLOAK_BETA_JWK_SET_URI: http://keycloak-beta:8181/realms/warehouse/protocol/openid-connect/certs
+    ports:
+      - "8081:8081"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8081/actuator/health | grep -q UP"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  order-service:
+    build:
+      context: ./order-service
+    depends_on:
+      keycloak-alpha:
+        condition: service_healthy
+      inventory-service:
+        condition: service_healthy
+      keycloak-setup:
+        condition: service_completed_successfully
+    environment:
+      KEYCLOAK_ALPHA_ISSUER: http://localhost:8180/realms/customer
+      KEYCLOAK_ALPHA_JWK_SET_URI: http://keycloak-alpha:8180/realms/customer/protocol/openid-connect/certs
+      KEYCLOAK_BETA_TOKEN_URL: http://keycloak-beta:8181/realms/warehouse/protocol/openid-connect/token
+      INVENTORY_SERVICE_URL: http://inventory-service:8081
+      TOKEN_EXCHANGE_CLIENT_ID: order-service-broker
+      TOKEN_EXCHANGE_CLIENT_SECRET: order-service-broker-secret
+      TOKEN_EXCHANGE_SUBJECT_ISSUER: customer-idp
+      TOKEN_EXCHANGE_AUDIENCE: inventory-api
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/actuator/health | grep -q UP"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s

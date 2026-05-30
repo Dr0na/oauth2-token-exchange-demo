@@ -1,0 +1,33 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: order-service
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${KEYCLOAK_ALPHA_ISSUER:http://localhost:8180/realms/customer}
+          jwk-set-uri: ${KEYCLOAK_ALPHA_JWK_SET_URI:http://localhost:8180/realms/customer/protocol/openid-connect/certs}
+
+inventory:
+  service:
+    url: ${INVENTORY_SERVICE_URL:http://localhost:8081}
+
+token-exchange:
+  token-url: ${KEYCLOAK_BETA_TOKEN_URL:http://localhost:8181/realms/warehouse/protocol/openid-connect/token}
+  client-id: ${TOKEN_EXCHANGE_CLIENT_ID:order-service-broker}
+  client-secret: ${TOKEN_EXCHANGE_CLIENT_SECRET:order-service-broker-secret}
+  subject-issuer: ${TOKEN_EXCHANGE_SUBJECT_ISSUER:customer-idp}
+  audience: ${TOKEN_EXCHANGE_AUDIENCE:inventory-api}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+logging:
+  level:
+    com.example.orders: INFO
